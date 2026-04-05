@@ -2,7 +2,7 @@
 
 Route network traffic through different interfaces based on domain names — using plain Linux policy routing. No VPN, no kernel modules, no iptables.
 
-```
+```text
 youtube.com            →  wlan0   (unlimited SIM)
 *.googlevideo.com      →  wlan0   (matched live as DNS resolves)
 github.com             →  eth0    (default broadband)
@@ -16,7 +16,7 @@ routectl resolves domain names to IPs and installs `/32` host routes that overri
 
 For **exact** domains, it pre-resolves them on startup. For **glob and regex** patterns (like `*.googlevideo.com`), it runs a DNS proxy in the background that intercepts every DNS response on the machine and installs routes on the fly — before the app even opens the connection. Both happen automatically from a single command.
 
-```
+```bash
 # What routectl does under the hood:
 ip route replace 142.250.74.14/32 via 10.20.30.1 dev wlan0 metric 50
 ip route replace 203.0.113.1/32   via 10.20.30.1 dev wlan0 metric 50
@@ -46,14 +46,14 @@ pip install pyyaml
 
 ## Quick start
 
-**1. Find your interface names**
+### 1. Find your interface names
 
 ```bash
 ip link show        # → eth0, wlan0, wg0 …
 ip route show       # → gateways
 ```
 
-**2. Edit `routes.yaml`**
+### 2. Edit `routes.yaml`
 
 ```yaml
 default: broadband
@@ -72,14 +72,14 @@ rules:
       - "*.ytimg.com"
 ```
 
-**3. Test your rules — no root needed**
+### 3. Test your rules — no root needed
 
 ```bash
 python3 -m routectl test youtube.com
 python3 -m routectl test rr3.sn-abc.googlevideo.com
 ```
 
-**4. Run**
+### 4. Run
 
 ```bash
 sudo python3 -m routectl daemon
@@ -92,7 +92,7 @@ That's it. routectl pre-routes all literal domains, then automatically starts th
 ## Commands
 
 | Command | Root | Description |
-|---------|------|-------------|
+| --------- | ------ | ------------- |
 | `daemon` | ✓ | Run forever: pre-routes literals, auto-starts DNS proxy if glob/regex rules exist, refreshes periodically |
 | `apply-all` | ✓ | One-shot: resolve and route all literal domains from the config, then exit |
 | `apply <domain …>` | ✓ | Resolve and route specific domains |
@@ -101,10 +101,10 @@ That's it. routectl pre-routes all literal domains, then automatically starts th
 | `test <domain>` | — | Show which interface a domain would use (no changes) |
 | `info` | — | Show detected gateways and interface state |
 
-**Flags:**
+### Flags
 
 | Flag | Description |
-|------|-------------|
+| ------ | ------------- |
 | `-c / --config <file>` | Config file path (default: `routes.yaml`) |
 | `-n / --dry-run` | Print `ip route` commands without running them |
 | `-v / --verbose` | Enable debug logging |
@@ -180,12 +180,15 @@ dns_upstream_port: 53
 Three types, freely mixed within any rule. Rules are evaluated top-to-bottom — first match wins.
 
 ### Exact
+
 ```yaml
 - youtube.com         # matches youtube.com and all subdomains (*.youtube.com)
 ```
 
 ### Glob
+
 Uses shell-style wildcards. Requires the DNS proxy (auto-started by `daemon`).
+
 ```yaml
 - "*.googlevideo.com"       # any subdomain
 - "cdn[0-9]*.twitch.tv"     # cdn1.twitch.tv, cdn99.twitch.tv …
@@ -193,14 +196,16 @@ Uses shell-style wildcards. Requires the DNS proxy (auto-started by `daemon`).
 ```
 
 | Symbol | Meaning |
-|--------|---------|
+| -------- | --------- |
 | `*` | Any number of characters |
 | `?` | Exactly one character |
 | `[abc]` | One character from the set |
 | `[0-9]` | One character from the range |
 
 ### Regex
+
 Wrap in `/slashes/`. Flags: `i` (case-insensitive), `m`, `s`, `x`. Requires the DNS proxy.
+
 ```yaml
 - "/\\.live$/"                            # any .live TLD
 - "/^(www\\.)?youtube\\.com$/"            # anchored match with optional www
@@ -215,7 +220,7 @@ Wrap in `/slashes/`. Flags: `i` (case-insensitive), `m`, `s`, `x`. Requires the 
 
 ## Package layout
 
-```
+```text
 routectl/
 ├── config.py      — Config, Interface, Rule dataclasses + YAML/JSON loader
 ├── iface.py       — device and gateway detection
@@ -337,23 +342,30 @@ On stop or reboot, the service flushes all managed routes and restores DNS autom
 
 ## Troubleshooting
 
-**Gateway not detected**
+### Gateway not detected
+
 Add it explicitly: `gateway: 10.20.30.1`. Run `ip route show dev <device>` to find it.
 
-**Traffic still going through wrong interface**
+### Traffic still going through wrong interface
+
 Check with `ip route get <ip>`. If wrong, look for conflicting policy rules with `ip rule show`.
 
-**Routes disappear after reboot**
+### Routes disappear after reboot
+
 The kernel routing table is in-memory. Use the systemd service for persistence.
 
-**Glob/regex not matching**
+### Glob/regex not matching
+
 Make sure you're running `daemon`, not `apply-all`. Use `test` to verify the pattern:
+
 ```bash
 python3 -m routectl test rr3.sn-abc.googlevideo.com
 ```
 
-**DNS not restored after crash**
+### DNS not restored after crash
+
 Run manually:
+
 ```bash
 # systemd-resolved:
 sudo systemctl restart systemd-resolved
