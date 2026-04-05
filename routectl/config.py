@@ -122,10 +122,51 @@ def load(path: str) -> Config:
     ext  = Path(path).suffix.lower()
     raw: dict = _parse_yaml(text) if (ext in ('.yaml', '.yml') or _yaml) else json.loads(text)
 
+    # Sanity-check the top-level structure
+    if not isinstance(raw, dict):
+        raise SystemExit(
+            f"\nConfig error: {path} did not parse as a YAML mapping.\n"
+            f"  Got: {type(raw).__name__} — check for syntax errors at the top of the file.\n"
+        )
+
+    ifaces_raw = raw.get("interfaces", {})
+    if not isinstance(ifaces_raw, dict):
+        raise SystemExit(
+            f"\nConfig error: 'interfaces' block is not a mapping.\n"
+            f"  Got: {type(ifaces_raw).__name__}\n"
+            f"  Parsed value: {ifaces_raw!r}\n\n"
+            f"  The interfaces block must be a dict, e.g.:\n\n"
+            f"    interfaces:\n"
+            f"      eth0_iface:\n"
+            f"        device: eth0\n"
+        )
+
     table_base = int(raw.get("table_base", 200))
 
     interfaces: dict[str, Interface] = {}
-    for i, (name, spec) in enumerate(raw.get("interfaces", {}).items()):
+    for i, (name, spec) in enumerate(ifaces_raw.items()):
+        # Defend against malformed YAML — interface block parsed as a list
+        # instead of a dict (usually caused by accidental `- key: val` syntax).
+        if not isinstance(spec, dict):
+            raise SystemExit(
+                f"\nConfig error in interface '{name}':\n"
+                f"  Expected a mapping (key: value pairs) but got: {type(spec).__name__}\n"
+                f"  Parsed value: {spec!r}\n\n"
+                f"  Check your routes.yaml — interface blocks must look like:\n\n"
+                f"    {name}:\n"
+                f"      device: eth0\n"
+                f"      gateway: 192.168.1.1   # optional\n\n"
+                f"  Common mistake — accidental list syntax (do NOT use dashes):\n"
+                f"    {name}:\n"
+                f"      - device: eth0         # wrong\n"
+            )
+        if "device" not in spec:
+            raise SystemExit(
+                f"\nConfig error in interface '{name}': missing required field 'device'.\n"
+                f"  Add the kernel device name, e.g.:\n\n"
+                f"    {name}:\n"
+                f"      device: eth0\n"
+            )
         interfaces[name] = Interface(
             name        = name,
             device      = spec["device"],
