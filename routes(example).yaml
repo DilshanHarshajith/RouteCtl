@@ -1,0 +1,156 @@
+# ════════════════════════════════════════════════════════════════════════════
+#  routectl — routes.yaml
+# ════════════════════════════════════════════════════════════════════════════
+#
+#  Run with:  sudo python3 -m routectl daemon
+#
+#  - Exact domains  →  pre-resolved on startup
+#  - Glob / regex   →  matched live via DNS proxy (started automatically)
+#
+# ════════════════════════════════════════════════════════════════════════════
+
+
+# ── Global settings ───────────────────────────────────────────────────────────
+
+default: main_isp           # interface for domains that match no rule
+                            # omit this line to leave unmatched traffic alone
+
+default_ttl: 300            # seconds to cache resolved IPs (per-rule override available)
+daemon_interval: 60         # seconds between refresh cycles
+resolve_retries: 3
+resolve_timeout: 4.0
+ipv6: false                 # set true to also manage IPv6 (AAAA) routes
+
+
+# ── Interfaces ────────────────────────────────────────────────────────────────
+#
+#  device       required  kernel device name — find yours with: ip link show
+#  gateway      optional  next-hop IP — auto-detected from routing table if omitted
+#  metric       optional  route priority; lower wins (default: 100, 110, 120 …)
+#  description  optional  label shown in `status` output
+
+interfaces:
+
+  unlimited_sim:
+    device: wlan0
+    # gateway: 10.20.30.1     ← uncomment if auto-detect fails
+    metric: 50
+    description: "Carrier SIM — zero-rated / unlimited data"
+
+  main_isp:
+    device: eth0
+    # gateway: 192.168.1.1
+    metric: 100
+    description: "Home broadband — default path"
+
+  # ── Additional interface templates (uncomment to use) ─────────────────────
+
+  # wireguard:
+  #   device: wg0              # no gateway needed — WireGuard is point-to-point
+  #   metric: 40
+  #   description: "WireGuard tunnel"
+
+  # mobile_backup:
+  #   device: wwan0
+  #   metric: 200
+  #   description: "Mobile backup — metered, use sparingly"
+
+
+# ── Rules ─────────────────────────────────────────────────────────────────────
+#
+#  Evaluated top → bottom. First match wins.
+#
+#  Pattern types:
+#    exact   youtube.com          matches youtube.com and *.youtube.com
+#    glob    "*.googlevideo.com"  shell wildcards: * ? [abc] [0-9]
+#    regex   "/pattern/flags"     Python regex — flags: i m s x
+#
+#  Exact domains are pre-resolved at startup.
+#  Glob and regex are matched live by the DNS proxy (auto-started by daemon).
+
+rules:
+
+  # ── YouTube ──────────────────────────────────────────────────────────────────
+  - comment: "YouTube — player, thumbnails, video CDN"
+    via: unlimited_sim
+    ttl: 600
+    domains:
+      - youtube.com               # exact: also covers *.youtube.com
+      - youtu.be
+      - "*.googlevideo.com"       # glob: video delivery CDN — most of the bandwidth
+      - "*.ytimg.com"             # glob: thumbnails and images
+      - "*.yt3.ggpht.com"         # glob: channel avatars
+
+  # ── Netflix ───────────────────────────────────────────────────────────────────
+  - comment: "Netflix — app and CDN"
+    via: unlimited_sim
+    ttl: 600
+    domains:
+      - netflix.com
+      - "*.nflxext.com"
+      - "*.nflxso.net"
+      - "*.nflximg.net"
+      - "*.nflxvideo.net"
+
+  # ── Spotify ───────────────────────────────────────────────────────────────────
+  - comment: "Spotify — app and audio CDN"
+    via: unlimited_sim
+    ttl: 400
+    domains:
+      - spotify.com
+      - "*.spotify.com"
+      - "*.scdn.co"
+      - "*.spotifycdn.com"
+
+  # ── TikTok ────────────────────────────────────────────────────────────────────
+  - comment: "TikTok"
+    via: unlimited_sim
+    ttl: 300
+    domains:
+      - tiktok.com
+      - "*.tiktok.com"
+      - "*.tiktokcdn.com"
+      - "*.tiktokv.com"
+      - "*.musical.ly"
+
+  # ── Twitch ────────────────────────────────────────────────────────────────────
+  - comment: "Twitch — live streams and VODs"
+    via: unlimited_sim
+    ttl: 120
+    domains:
+      - twitch.tv
+      - "*.twitch.tv"
+      - "*.twitchsvc.net"
+      - "cdn[0-9]*.twitch.tv"     # glob with character class: cdn1…cdn99
+
+  # ── Regex examples ────────────────────────────────────────────────────────────
+  - comment: "Akamai CDN — covers all subdomain variants"
+    via: unlimited_sim
+    ttl: 600
+    domains:
+      - "/\\.akamai(zed|technologies|edge|hd|dns)?\\.(?:com|net)$/"
+
+  - comment: "Any .live or .stream TLD — catch-all for live video services"
+    via: unlimited_sim
+    ttl: 120
+    domains:
+      - "/\\.live$/"
+      - "/\\.stream$/"
+
+  # ── Route specific traffic via main ISP ───────────────────────────────────────
+  - comment: "GitHub — dev traffic stays on broadband"
+    via: main_isp
+    domains:
+      - github.com
+      - "*.github.com"
+      - "*.githubusercontent.com"
+      - "*.githubassets.com"
+
+  - comment: "Large downloads — keep off the SIM"
+    via: main_isp
+    ttl: 3600
+    domains:
+      - "*.releases.ubuntu.com"
+      - archive.ubuntu.com
+      - "*.debian.org"
+      - "*.kernel.org"
