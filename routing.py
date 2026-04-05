@@ -113,6 +113,8 @@ def del_route(ip: str, dry_run: bool) -> bool:
 # ── matching ───────────────────────────────────────────────────────────────────
 
 def match_interface(hostname: str, cfg: Config) -> Optional[Interface]:
+    """Pure rule match — does not check whether the interface is actually up.
+    Used by the `test` command to show rule logic without runtime fallback."""
     for rule in cfg.rules:
         if rule.matches(hostname):
             return cfg.interfaces[rule.interface_name]
@@ -128,6 +130,67 @@ def match_rule(hostname: str, cfg: Config) -> Optional[Rule]:
     return None
 
 
+def resolve_interface(hostname: str, cfg: Config) -> Optional[Interface]:
+    """
+    Resolve which interface to use for a hostname at route-install time.
+    Applies two fallback layers on top of plain rule matching:
+
+    1. Single live interface — if only one interface is up and reachable,
+       use it for all traffic regardless of rules.
+
+    2. Target down — if the rule-matched interface is not available, fall
+       back to: (a) the configured default, (b) any other live interface.
+
+    Always returns a live interface or None if nothing is available.
+    """
+    from .iface import live_interfaces
+    live = live_interfaces(cfg)
+
+    # ── layer 1: only one interface available ─────────────────────────────────
+    if len(live) == 1:
+        sole = live[0]
+        wanted = match_interface(hostname, cfg)
+        if wanted and wanted.name != sole.name:
+            log.info(
+                "  FALLBACK  %s: target '%s' unavailable, only '%s' is live",
+                hostname, wanted.name, sole.name,
+            )
+        return sole
+
+    # ── layer 2: normal match with down-interface fallback ────────────────────
+    live_names = {i.name for i in live}
+    wanted = match_interface(hostname, cfg)
+
+    if wanted is None:
+        return None                             # no rule and no default
+
+    if wanted.name in live_names:
+        return wanted                           # happy path
+
+    # wanted interface is down — find a fallback
+    fallback: Optional[Interface] = None
+
+    # prefer the configured default if it's live
+    if cfg.default_interface and cfg.default_interface in live_names:
+        fallback = cfg.interfaces[cfg.default_interface]
+    # otherwise take any live interface (sorted by metric for determinism)
+    elif live:
+        fallback = sorted(live, key=lambda i: i.metric)[0]
+
+    if fallback:
+        log.warning(
+            "  FALLBACK  %s: '%s' is down → routing via '%s' instead",
+            hostname, wanted.name, fallback.name,
+        )
+    else:
+        log.warning(
+            "  NO-ROUTE  %s: '%s' is down and no fallback available",
+            hostname, wanted.name,
+        )
+
+    return fallback
+
+
 # ── bulk apply ─────────────────────────────────────────────────────────────────
 
 def apply_domains(
@@ -138,13 +201,14 @@ def apply_domains(
 ) -> tuple[int, int, int]:
     """
     Resolve each domain, add /32 routes for matched IPs.
+    Uses resolve_interface() for live-aware routing with fallback.
     Returns (added, refreshed, failed).
     """
     now = time.time()
     added = refreshed = failed = 0
 
     for hostname in domains:
-        iface = match_interface(hostname, cfg)
+        iface = resolve_interface(hostname, cfg)
         if iface is None:
             log.debug("No interface for %s — skipped", hostname)
             continue

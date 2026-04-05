@@ -64,3 +64,16 @@ def device_is_up(device: str) -> bool:
 def get_addrs(device: str) -> list[str]:
     r = _run(["ip", "-4", "addr", "show", "dev", device])
     return re.findall(r'inet ([\d.]+)/', r.stdout)
+
+
+def live_interfaces(cfg: Config) -> list[Interface]:
+    """
+    Return interfaces that are currently up and have a usable gateway.
+    Checked fresh on every call so the daemon reacts to interfaces
+    coming up or going down between refresh cycles.
+    """
+    live = []
+    for iface in cfg.interfaces.values():
+        if iface.gw and device_exists(iface.device) and device_is_up(iface.device):
+            live.append(iface)
+    return live

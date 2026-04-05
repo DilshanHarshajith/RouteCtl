@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Optional
 
 from .config import Config
-from .routing import add_route, match_interface, match_rule, save_state
+from .routing import add_route, resolve_interface, match_rule, save_state
 
 log = logging.getLogger("routectl.dns")
 
@@ -151,7 +151,7 @@ class _Handler(socketserver.BaseRequestHandler):
         state = self.server.state
         lock  = self.server.lock
 
-        iface = match_interface(hostname, cfg)
+        iface = resolve_interface(hostname, cfg)
         if iface is None:
             return
 
